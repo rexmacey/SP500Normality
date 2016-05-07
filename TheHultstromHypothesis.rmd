@@ -1,0 +1,110 @@
+---
+title: "Testing the Hultstrom Hypothesis"
+author: "Rex Macey"
+date: "May 7, 2016"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(PerformanceAnalytics)
+```
+
+# Testing the Hultstrom Hypothesis
+At the CIO lunch on Friday May 6, I believe the David postulated that the historical standard deviation of the 
+S&P 500 could be used to predict downside risk of the market.  David qualified this, indicating it would not be true for daily data but would be true for longer periods such as months or years. This analysis is an examination of this hypothesis.
+
+# Data
+The data used here are monthy total returns for the S&P 500. Source: DFA returns program. The following plot shows the data.
+
+```{r, echo=FALSE, warning=FALSE}
+library(xts)
+ret<-read.csv("SP500Monthly.csv",header=TRUE,stringsAsFactors = FALSE)
+temp<-as.Date(ret$Date,origin="1899-12-30")
+data<-xts(ret$SP500,order.by=temp)
+par(col="blue")
+plot(data,main="Monthly returns of the S&P 500", ylab="Return")
+```
+## Q-Q plot
+The standard illustration for normality is the Q-Q plot see [Wikipedia](https://en.wikipedia.org/wiki/Q%E2%80%93Q_plot). If this data were normally distributed then we'd expect to see the points fall on the line.  They do not. The tails are fatter.
+
+```{r, echo=FALSE, warning=FALSE}
+qqnorm(data, ylab="Monthly S&P 500 Returns")
+qqline(data,col="red")
+```
+
+## Histograms
+If you prefer to see this with a histogram, we first plot a histogram of the actual returns. Then we plot a histogram of the actual and theoretical returns. Theoretical here is a set of `r length(data)` normally distributed returns with the same mean and standard deviation as the actual observations. The actual (red) observations have fatter tails than we'd expect.
+
+```{r, echo=FALSE, }
+data.mean<-mean(data)
+data.sd<-sd(data)
+p<-seq(1,length(data))/(length(data)+1)
+q<-qnorm(p,data.mean,data.sd)
+# y<-pnorm(x,data.mean,data.sd)
+hist(data,col=rgb(1,0,0,0.5), main="Histogram of Actual Returns")
+hist(data,col=rgb(1,0,0,0.5), main="Histogram of Actual and Theoretical Returns")
+hist(q,col=rgb(0,0,1,0.5),add=TRUE)
+```
+
+## Boxplot
+A boxplot of the monthly observed and theoretical returns is a nice way to see the fat tails of the actual data.
+```{r, echo=FALSE, }
+bpdata<-data.frame(SP500=ret$SP500,Theor=q)
+boxplot(bpdata,col=c(rgb(1,0,0,0.5),rgb(0,0,1,0.5)),main="Boxplot of Actual and Theoretical Returns")
+```
+
+## Drawdowns
+The assignment here is to see if the standard deviation predicts "worst years".  But for fun, let's look at the worst 5 drawdowns:
+
+```{r, echo=FALSE, comment="" }
+table.Drawdowns(data)
+
+```
+
+## Worst 12 month periods
+So let's look at 12 month periods.  The following is the rolling 1 year performance. 
+
+```{r, echo=FALSE, }
+
+y<-apply.rolling(data,12,FUN=Return.annualized,scale=12)*100
+miny<-min(y,na.rm=TRUE)
+plot(y,main="Rolling 12 Month Returns for the S&P 500",ylab="Return %")
+abline(h=miny,col="red")
+abline(h=-38,col="green")
+text(index(y[floor(length(y)/2)]),miny,"Min",col="red")
+data.annret<-100*(prod(1+data)^(12/length(data))-1)
+data.annsd<-data.sd*sqrt(12)*100
+z<-(miny-data.annret)/data.annsd
+y.sort<-as.numeric(y)
+y.sort<-y.sort[order(y.sort)]
+z38<-(-38-data.annret)/data.annsd
+```
+
+The worst 12 month return is `r round(miny,1)`%.  The annualized return and standard deviation are `r  round(data.annret,1)`% and `r round(data.annsd,1)`%.  The worst return is `r round(z,3)` standard deviations from the mean.  There is a `r pnorm(miny,data.annret,data.annsd)*100`% change of this assuming a normal distribution.  That should occur once every `r round(1/pnorm(miny,data.annret,data.annsd),0)` years.  
+
+Let's pick a loss of 38% in 12 months.  That's occurred in 4 different bear markets.  How often should we expect to lose 38%?  The z-score is `r round(z38,3)` and the probability associated with that is `r pnorm(-38,data.annret,data.annsd)*100`% which should occur about once every  `r round(1/pnorm(-38,data.annret,data.annsd),0)` years.  
+
+We have large drawdowns occuring too often.  Further by using the data from 1926- (rather than more recent data) we are increasing our standard deviation. With a higher standard deviation we'd expect large losses. Yet our losses are still too large. 
+
+## A different perspective
+Let's say we think we'll experience 38% losses about every 20 years. Let's also assume an 8% return on the stock market.  What standard deviation would we assume to generate that experience? One year in 20 is a probability of 5% which translates to a z-score of `r qnorm(.05)`.  This would indicate the standard deviation would need to be $(-38-8)/`r qnorm(.05)`= 27.97$.
+
+Let's look at rolling standard deviation.  Analysts might use a look-back period to estimate risk.
+```{r, echo=FALSE, }
+y36<-apply.rolling(data,36,FUN=StdDev.annualized,scale=12)*100
+y60<-apply.rolling(data,60,FUN=StdDev.annualized,scale=12)*100
+y120<-apply.rolling(data,120,FUN=StdDev.annualized,scale=12)*100
+par(col="blue")
+plot(y36,main="Rolling Annualized Standard Deviation",ylab="Std Dev %")
+lines(y60,col="green")
+lines(y120,col="red")
+abline(h=27.97,col="gray")
+par(col="black")
+legend("topright",col=c("blue","green","red","gray"),legend=c("36mo","60mo","120mo","27.97%"),lty=1)
+```
+
+Even using fairly short windows (36 months), one cannot find periods with a 27.97% standard deviation in recent history.  
+
+## Conclusion
+I think we need a new hypothesis.  
