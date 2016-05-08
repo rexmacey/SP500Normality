@@ -1,0 +1,144 @@
+---
+title: "Why be normal?"
+author: "Rex Macey"
+date: "May 8, 2016"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+This document is a follow-up to the Hultstrom Hypothesis test. In this, I look for distributions that fit our monthly S&P 500 returns better than the normal distribution.  Let's start with a summary of the returns.
+
+```{r, echo=FALSE, warning=FALSE, comment="", message=FALSE}
+library(xts)
+library(fitdistrplus)
+library(knitr)
+RMSE<-function(pred,obs){
+    return(sum((pred-obs)^2)^.5)
+}
+
+R2<-function(pred,obs){
+    obs.mean<-mean(obs)
+    sst<-sum((obs-obs.mean)^2)
+    ssr<- sum((pred-obs)^2)
+    return(1-ssr/sst)
+}
+
+meanabsdev<-function(pred,obs){
+    abserr<-abs(pred-obs)
+    return(mean(abserr))
+}
+
+ret<-read.csv("SP500Monthly.csv",header=TRUE,stringsAsFactors = FALSE)
+temp<-as.Date(ret$Date,origin="1899-12-30")
+data<-xts(ret$SP500,order.by=temp)
+data.mean<-mean(data)
+data.sd<-sd(data)
+plot(data,main="Monthly returns of the S&P 500", ylab="Return")
+npoints<-length(data)
+pts<-ppoints(npoints)
+data.sort<-ret$SP500[order(ret$SP500)]
+summary(data.sort)
+
+method<-"mle"
+fit.norm<-fitdist(data.sort,"norm",method=method)
+fit.norm.z<-qnorm(pts)
+fit.norm.pred<-qnorm(pts,fit.norm$estimate["mean"],fit.norm$estimate["sd"])
+
+l<-1+data.sort
+fit.lnorm<-fitdist(1+data.sort,"lnorm",method=method)
+fit.lnorm.pred<-qlnorm(pts,fit.lnorm$estimate["meanlog"],fit.lnorm$estimate["sdlog"])
+
+z<-(data.sort-data.mean)/data.sd
+fit.t<-fitdist(z,"t",start=list(df=3),method=method)
+fit.t.pred<-qt(pts,fit.t$estimate["df"])
+fit.t.pred<-fit.t.pred*data.sd+data.mean
+
+r2rmse<-data.frame(R2=numeric(3),RMSE=numeric(3),MAE=numeric(3))
+rownames(r2rmse)<-c("Normal","Log Normal","Student t")
+r2rmse["Normal","R2"]<-R2(fit.norm.pred,data.sort)
+r2rmse["Log Normal","R2"]<-R2(fit.lnorm.pred-1,data.sort)
+r2rmse["Student t","R2"]<-R2(fit.t.pred,data.sort)
+r2rmse["Normal","RMSE"]<-RMSE(fit.norm.pred,data.sort)
+r2rmse["Log Normal","RMSE"]<-RMSE(fit.lnorm.pred-1,data.sort)
+r2rmse["Student t","RMSE"]<-RMSE(fit.t.pred,data.sort)
+r2rmse["Normal","MAE"]<-meanabsdev(fit.norm.pred,data.sort)
+r2rmse["Log Normal","MAE"]<-meanabsdev(fit.lnorm.pred-1,data.sort)
+r2rmse["Student t","MAE"]<-meanabsdev(fit.t.pred,data.sort)
+
+summarytbl<-rbind(summary(data.sort),
+                  summary(fit.norm.pred),
+                  summary(fit.lnorm.pred-1),
+                  summary(fit.t.pred))
+summarytbl<-data.frame((summarytbl))
+rownames(summarytbl)<-c("Observed","Normal","Log Normal","Student t")
+colnames(summarytbl)<-c("Min","1st Qu.","Median","Mean","3rd Qu.","Max")
+```
+The standard deviation is `r round(sd(data.sort),6)`.
+
+## The Distributions 
+We fit three distributions: normal, lognormal and Student t.  The parameters for the normal distribution are:
+Mean: `r round(fit.norm$estimate["mean"],6)`
+
+SD: `r round(fit.norm$estimate["sd"],6)`
+
+A variable is said to be lognormally distributed if its log is normally distributed.  In finance this is often used.  It's the distribution underlying the Black-Scholes option pricing model.  In this case, it is assumed that 1+r is lognormally distributed, so we add one to each of the returns.  The parameters we find are:
+Meanlog: `r round(fit.lnorm$estimate["meanlog"],6)`
+
+SDlog: `r round(fit.lnorm$estimate["sdlog"],6)`
+
+Last but not least we use a Student t distribution.  This is often used to test for significance when normality cannot be assumed.  The distribution has fatter tails than the normal distribution which is why it was chosen. The Student t distribution approaches a normal distribution when the degrees of freedom (df) is high.  Here we find the df parameter which is:
+df: `r round(fit.t$estimate["df"],6)`
+
+## The Fits
+For each of the three models we will look at the R-Square, the root mean square error, and the mean absolute error. In addition we compare a summary of the distribution with the observed returns.  
+
+```{r kable, echo=FALSE}
+kable(round(r2rmse,3))
+
+kable(summarytbl)
+```
+
+The observed (actual) returns have a wider range (Min to Max) than the predicted, but the Student t comes closer and has better R2 and RMSE values.  However, the normal fit performs better on mean absolute error.  Below are plots of the predicted v the observed returns.  The Student t does come closer on the extremes, particularly the downside. 
+
+```{r echo=FALSE}
+par(mfrow=c(1,3))
+plot(fit.norm.pred,data.sort,ylim=c(-0.3,.45),xlim=c(-0.3,.45),main="Normal",xlab="Predicted",ylab="Observed",col="blue")
+abline(0,1)
+plot(fit.lnorm.pred-1,data.sort,ylim=c(-0.3,.45),xlim=c(-0.3,.45),main="Log Normal",xlab="Predicted",ylab="Observed",col="blue")
+abline(0,1)
+plot(fit.t.pred,data.sort,ylim=c(-0.3,.45),xlim=c(-0.3,.45),main="Student t",xlab="Predicted",ylab="Observed",col="blue")
+abline(0,1)
+par(mfrow=c(1,1))
+```
+
+The picture isn't entirely clear as the following chart shows.  While the Student t (green) has smaller errors at the extreme, it has larger errors in other regions.  That is why the MAE score is higher.  
+```{r echo=FALSE}
+fit.norm.err<-fit.norm.pred-data.sort
+fit.lnorm.err<-fit.lnorm.pred-1-data.sort
+fit.t.err<-fit.t.pred-data.sort
+plot(fit.norm.err,col="blue",pch=16,main="Errors (Residuals)",xlab="",ylab="Error")
+points(fit.lnorm.err,col="red",pch=16)
+points(fit.t.err,col="green",pch=16)
+abline(h=0,col="gray")
+legend("bottomleft",legend=c("Normal","Log Normal","Student t"),pch=16,col=c("blue","red","green"))
+```
+
+To see the errors toward the center more clearly, the chart below truncates the 100 most extreme returns on each side.
+
+```{r echo=FALSE}
+xlow<-100
+xhigh<-npoints-100
+plot(fit.norm.err[xlow:xhigh],col="blue",pch=16,main="Errors (Residuals) - Truncated",xlab="",ylab="Error")
+points(fit.lnorm.err[xlow:xhigh],col="red",pch=16)
+points(fit.t.err[xlow:xhigh],col="green",pch=16)
+abline(h=0,col="gray")
+legend("topleft",legend=c("Normal","Log Normal","Student t"),pch=16,col=c("blue","red","green"))
+```
+
+## Conclusion
+I don't see an unequivocable best fit.  If one is more concerned about capturing the extremes, one would use the Student t.  If one cares equally about all predictions and if errors are penalized by a factor of 1 (meaning a 0.03 error is 3x worse than a 0.01 error), then the normal distribution is better.
+
+There might be a Frankenstein way to combine these in a piece-wise fashion.  We might use the Student t to predict extremes and the normal for non-extreme. This may not be crazy if one believes that returns in a crisis come from a different distribution than returns in a "normal" market.  If one were to make such an assumption, then one would could improve the fit in a normal market where from the preceding chart we observe a pattern in the errors which could be corrected.
